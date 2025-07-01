@@ -7,6 +7,13 @@
   <%- include('includes/header.ejs') %>
   <main id="signup">
     <h1>Signup</h1>
+    <div>
+      <% if (errorMessage) { %>
+        <div class="error-message">
+          <p><%= errorMessage %></p>
+        </div>
+      <% } %>
+    </div>
     <form action="/signup" method="POST">
       <div class="form-control">
         <label for="email">Email</label>
@@ -22,6 +29,7 @@
       </div>
       <button class="btn">Create user</button>
     </form>
+    
     <div id="auth-alternative">
       <a class="btn btn-alt" href="/login">Login instead</a>
     </div>
