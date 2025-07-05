@@ -7,6 +7,20 @@
   <%- include('includes/header.ejs') %>
   <main id="signup">
     <h1>Login</h1>
+    <div>
+      <!-- Error message section -->
+      <% if (inputData.hasError && inputData.errorMessage) { %>
+        <div style="color: red; font-weight: bold; margin-bottom: 10px;" class="input-error">
+          <%= inputData.errorMessage %>
+        </div>
+      <% } %>
+      <!-- Success message section -->
+      <% if (inputData.hasError && inputData.successMessage) { %>
+        <div style="color: green; font-weight: bold; margin-bottom: 10px;">
+          <%= inputData.successMessage %>
+        </div>
+      <% } %>
+    </div>
     <form action="/login" method="POST">
       <div class="form-control">
         <label for="email">Email</label>

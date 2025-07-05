@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcryptjs");
 
 const db = require("../data/database");
+const { ObjectId } = require("mongodb");
 
 const router = express.Router();
 
@@ -10,11 +11,37 @@ router.get("/", function (req, res) {
 });
 
 router.get("/signup", function (req, res) {
-  res.render("signup");
+  let sessionInputData = req.session.inputData;
+
+  if (!sessionInputData) {
+    sessionInputData = {
+      hasError: false,
+      email: "",
+      confirmEmail: "",
+      errorMessage: "",
+      successMessage: "",
+    };
+  }
+
+  req.session.inputData = null; // Clear session input data after rendering the signup page
+
+  res.render("signup", { inputData: sessionInputData });
 });
 
 router.get("/login", function (req, res) {
-  res.render("login");
+  let sessionInputData = req.session.inputData;
+
+  if (!sessionInputData) {
+    sessionInputData = {
+      hasError: false,
+      errorMessage: "",
+      successMessage: "",
+    };
+  }
+
+  req.session.inputData = null; // Clear session input data after rendering the login page
+
+  res.render("login", { inputData: sessionInputData });
 });
 
 router.post("/signup", async function (req, res) {
@@ -23,20 +50,64 @@ router.post("/signup", async function (req, res) {
   const confirmEmail = userData["confirm-email"]; //since - is not allowed while accessing via .(dot)
   const password = userData.password;
 
+  const inputData = {
+    hasError: true,
+    email: email,
+    confirmEmail: confirmEmail,
+  };
+
   if (!email || !confirmEmail || !password || !email.includes("@")) {
-    return res.render("signup", { errorMessage: "Invalid inputs!" });
+    req.session.inputData = {
+      ...inputData,
+      errorMessage: "Invalid input!",
+      successMessage: null,
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/signup"); //this return will not allow the code to stop executing after this point
+    });
+    return;
   }
 
   if (email !== confirmEmail) {
-    return res.render("signup", {
-      errorMessage: "Email address does not match!"
+    req.session.inputData = {
+      ...inputData,
+      errorMessage: "Email address does not match!",
+      successMessage: null,
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/signup");
     });
+    return;
   }
 
-  if (password.length < 6) {
-    return res.render("signup", {
-      errorMessage: "Password must be at least 6 characters long!"
+  if (password.trim().length < 6) {
+    req.session.inputData = {
+      ...inputData,
+      errorMessage: "Password must be at least 6 characters long!",
+      successMessage: null,
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/signup");
     });
+    return;
+  }
+
+  const existingUser = await db
+    .getDb()
+    .collection("users")
+    .findOne({ email: email });
+
+  if (existingUser) {
+    console.log("User does exist");
+    req.session.inputData = {
+      ...inputData,
+      errorMessage: null,
+      successMessage: "User exists!",
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/signup");
+    });
+    return;
   }
 
   const hashPassword = await bcrypt.hash(password, 12);
@@ -47,7 +118,14 @@ router.post("/signup", async function (req, res) {
   };
 
   await db.getDb().collection("users").insertOne(user);
-  res.redirect("/login");
+  req.session.inputData = {
+    errorMessage: null,
+    successMessage: "User created successfully!",
+  }; // Store input data in session
+  req.session.save(function () {
+    return res.redirect("/login");
+  });
+  return;
 });
 
 router.post("/login", async function (req, res) {
@@ -60,29 +138,80 @@ router.post("/login", async function (req, res) {
     .collection("users")
     .findOne({ email: email });
 
-  // if (!existingUser) {
-  //   console.log("User does not exist");
-  //   return res.redirect("login", { errorMessage: "User does not exist!" });
-  // }
+  if (!existingUser) {
+    console.log("User does not exist");
+    req.session.inputData = {
+      hasError: true,
+      errorMessage: null,
+      successMessage: "User does not exist!",
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/login");
+    });
+    return;
+  }
 
   const isPasswordCorrect = await bcrypt.compare(
     password,
     existingUser.password
   );
 
-  // if (!isPasswordCorrect) {
-  //   console.log("Password Incorrect");
-  //   return res.redirect("login", { errorMessage: "Password Incorrect!" });
-  // }
+  if (!isPasswordCorrect) {
+    console.log("Password Incorrect");
+    req.session.inputData = {
+      hasError: true,
+      errorMessage: "Password Incorrect!",
+      successMessage: null,
+    }; // Store input data in session
+    req.session.save(function () {
+      res.redirect("/login");
+    });
+    return;
+  }
 
-  console.log("User is logged in!");
-  res.redirect("/admin");
+  req.session.user = {
+    id: existingUser._id.toString(),
+    email: existingUser.email,
+  };
+  req.session.isAuthenticated = true;
+  req.session.save(function () {
+    console.log("User is logged in!");
+    res.redirect("/profile");
+  }); // Save the session to ensure it is stored in the database
+  // return;
 });
 
-router.get("/admin", function (req, res) {
+router.get("/admin", async function (req, res) {
+  if (!req.session.isAuthenticated) {
+    // (!req.session.user)
+    return res.status(401).render("401");
+  }
+
+  const user = await db
+    .getDb()
+    .collection("users")
+    .findOne({ _id: ObjectId.createFromHexString(req.session.user.id) });
+  
+  if(!user || !user.isAdmin){
+    return res.status(403).render("403");
+  }
+
   res.render("admin");
 });
 
-router.post("/logout", function (req, res) {});
+router.get("/profile", function (req, res) {
+  if (!req.session.isAuthenticated) {
+    // (!req.session.user)
+    return res.status(401).render("401");
+  }
+
+  res.render("profile");
+});
+
+router.post("/logout", function (req, res) {
+  req.session.user = null;
+  req.session.isAuthenticated = false; // Reset the authentication status
+  res.redirect("/");
+});
 
 module.exports = router;
